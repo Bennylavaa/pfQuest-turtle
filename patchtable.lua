@@ -3,7 +3,7 @@ local loc = GetLocale()
 local dbs = { "items", "quests", "quests-itemreq", "objects", "units", "zones", "professions", "areatrigger", "refloot" }
 local noloc = { "items", "quests", "objects", "units" }
 
--- Patch databases to merge TurtleWoW data
+-- Patch databases to merge vanillaplus data
 local function patchtable(base, diff)
   for k, v in pairs(diff) do
     if type(v) == "string" and v == "_" then
@@ -18,45 +18,45 @@ end
 -- This is a workaround which is required until all clients are updated
 for id, name in pairs({GetMapZones(2)}) do
   if name == "Northwind " then
-    pfDB["zones"]["enUS-turtle"][5581] = "Northwind "
+    --pfDB["zones"]["enUS-vanillaplus"][5581] = "Northwind "
   end
 end
 
 local loc_core, loc_update
 for _, db in pairs(dbs) do
-  if pfDB[db]["data-turtle"] then
-    patchtable(pfDB[db]["data"], pfDB[db]["data-turtle"])
+  if pfDB[db]["data-vanillaplus"] then
+    patchtable(pfDB[db]["data"], pfDB[db]["data-vanillaplus"])
   end
 
   for loc, _ in pairs(pfDB.locales) do
-    if pfDB[db][loc] and pfDB[db][loc.."-turtle"] then
-      loc_update = pfDB[db][loc.."-turtle"] or pfDB[db]["enUS-turtle"]
+    if pfDB[db][loc] and pfDB[db][loc.."-vanillaplus"] then
+      loc_update = pfDB[db][loc.."-vanillaplus"] or pfDB[db]["enUS-vanillaplus"]
       patchtable(pfDB[db][loc], loc_update)
     end
   end
 end
 
 loc_core = pfDB["professions"][loc] or pfDB["professions"]["enUS"]
-loc_update = pfDB["professions"][loc.."-turtle"] or pfDB["professions"]["enUS-turtle"]
+loc_update = pfDB["professions"][loc.."-vanillaplus"] or pfDB["professions"]["enUS-vanillaplus"]
 if loc_update then patchtable(loc_core, loc_update) end
 
-if pfDB["minimap-turtle"] then patchtable(pfDB["minimap"], pfDB["minimap-turtle"]) end
-if pfDB["meta-turtle"] then patchtable(pfDB["meta"], pfDB["meta-turtle"]) end
+if pfDB["minimap-vanillaplus"] then patchtable(pfDB["minimap"], pfDB["minimap-vanillaplus"]) end
+if pfDB["meta-vanillaplus"] then patchtable(pfDB["meta"], pfDB["meta-vanillaplus"]) end
 
 -- Detect german client patch and switch some databases
-if TURTLE_DE_PATCH then
+if VANILLAPLUS_DE_PATCH then
   pfDB["zones"]["loc"] = pfDB["zones"]["deDE"] or pfDB["zones"]["enUS"]
   pfDB["professions"]["loc"] = pfDB["professions"]["deDE"] or pfDB["professions"]["enUS"]
 end
 
 -- Update bitmasks to include custom races
 if pfDB.bitraces then
-  pfDB.bitraces[256] = "Goblin"
-  pfDB.bitraces[512] = "BloodElf"
+ -- pfDB.bitraces[256] = "Goblin"
+ -- pfDB.bitraces[512] = "BloodElf"
 end
 
--- Use turtle-wow database url
-pfQuest.dburl = "https://database.turtle-wow.org/?quest="
+-- Use vanillaplus-wow database url
+--pfQuest.dburl = "https://database.vanillaplus.org/?quest="
 
 -- Disable Minimap in custom dungeon maps
 function pfMap:HasMinimap(map_id)
@@ -153,27 +153,440 @@ function pfDatabase:QueryServer()
   query:Show()
 end
 
--- Automatically clear quest cache if new turtle quests have been found
+-- Automatically clear quest cache if new vanillaplus quests have been found
 local updatecheck = CreateFrame("Frame")
 updatecheck:RegisterEvent("PLAYER_ENTERING_WORLD")
 updatecheck:SetScript("OnEvent", function()
-  if pfDB["quests"]["data-turtle"] then
-    -- count all known turtle-wow quests
+  if pfDB["quests"]["data-vanillaplus"] then
+    -- count all known vanillaplus-wow quests
     local count = 0
-    for k, v in pairs(pfDB["quests"]["data-turtle"]) do
+    for k, v in pairs(pfDB["quests"]["data-vanillaplus"]) do
       count = count + 1
     end
 
-    pfQuest:Debug("TurtleWoW loaded with |cff33ffcc" .. count .. "|r quests.")
+    pfQuest:Debug("Vanilla Plus loaded with |cff33ffcc" .. count .. "|r quests.")
 
     -- check if the last count differs to the current amount of quests
-    if not pfQuest_turtlecount or pfQuest_turtlecount ~= count then
+    if not pfQuest_vanillapluscount or pfQuest_vanillapluscount ~= count then
       -- remove quest cache to force reinitialisation of all quests.
       pfQuest:Debug("New quests found. Reloading |cff33ffccCache|r")
       pfQuest_questcache = {}
     end
 
     -- write current count to the saved variable
-    pfQuest_turtlecount = count
+    pfQuest_vanillapluscount = count
   end
 end)
+
+local function GetGrayLevel(charLevel)
+  if charLevel <= 5 then
+    return 0
+  elseif charLevel <= 49 then
+    return charLevel - math.floor(charLevel / 10) - 5
+  elseif charLevel == 50 then
+    return 40
+  elseif charLevel <= 59 then
+    return charLevel - math.floor(charLevel / 5) - 1
+  else
+    return charLevel - 9
+  end
+end
+
+-- Helper to gather item drop source info for a quest-starting item
+local function GetItemDropSources(item, items, units, objects, refloot)
+  local drop_sources = {}
+  local sources_with_levels = {}
+
+  if items[item]["U"] then
+    for unit, chance in pairs(items[item]["U"]) do
+      local unit_name = pfDB["units"]["loc"][unit]
+      if unit_name and not drop_sources[unit_name] then
+        drop_sources[unit_name] = true
+        local unit_level = units[unit] and units[unit]["lvl"] or "?"
+        sources_with_levels[unit_name] = {level = unit_level, chance = chance}
+      end
+    end
+  end
+
+  if items[item]["O"] then
+    for object, chance in pairs(items[item]["O"]) do
+      local obj_name = pfDB["objects"]["loc"][object]
+      if obj_name and not drop_sources[obj_name] then
+        drop_sources[obj_name] = true
+        sources_with_levels[obj_name] = {level = "Object", chance = chance}
+      end
+    end
+  end
+
+  if items[item]["R"] then
+    for ref, chance in pairs(items[item]["R"]) do
+      if refloot[ref] then
+        if refloot[ref]["U"] then
+          for unit in pairs(refloot[ref]["U"]) do
+            local unit_name = pfDB["units"]["loc"][unit]
+            if unit_name and not drop_sources[unit_name] then
+              drop_sources[unit_name] = true
+              local unit_level = units[unit] and units[unit]["lvl"] or "?"
+              sources_with_levels[unit_name] = {level = unit_level, chance = chance}
+            end
+          end
+        end
+        if refloot[ref]["O"] then
+          for object in pairs(refloot[ref]["O"]) do
+            local obj_name = pfDB["objects"]["loc"][object]
+            if obj_name and not drop_sources[obj_name] then
+              drop_sources[obj_name] = true
+              sources_with_levels[obj_name] = {level = "Object", chance = chance}
+            end
+          end
+        end
+      end
+    end
+  end
+
+  -- Build display text (up to 3 sources)
+  local sources_text = ""
+  local source_count = 0
+  local display_count = 0
+  for _ in pairs(drop_sources) do
+    source_count = source_count + 1
+  end
+
+  for source_name in pairs(drop_sources) do
+    display_count = display_count + 1
+    if display_count > 1 then sources_text = sources_text .. ", " end
+    sources_text = sources_text .. source_name
+    if display_count >= 3 then
+      if source_count > 3 then
+        sources_text = sources_text .. " (+" .. (source_count - 3) .. " more)"
+      end
+      break
+    end
+  end
+
+  return drop_sources, sources_with_levels, sources_text
+end
+
+-- Helper to find the best map source (most spawn points) for an item
+local function GetBestItemSource(item, items, units, objects, refloot)
+  local best_source = nil
+  local best_count = 0
+
+  if items[item]["U"] then
+    for unit, chance in pairs(items[item]["U"]) do
+      if units[unit] and units[unit]["coords"] then
+        local count = table.getn(units[unit]["coords"])
+        if count > best_count then
+          best_count = count
+          best_source = {type = "unit", id = unit}
+        end
+      end
+    end
+  end
+
+  if items[item]["O"] then
+    for object, chance in pairs(items[item]["O"]) do
+      if objects[object] and objects[object]["coords"] then
+        local count = table.getn(objects[object]["coords"])
+        if count > best_count then
+          best_count = count
+          best_source = {type = "object", id = object}
+        end
+      end
+    end
+  end
+
+  if items[item]["R"] then
+    for ref, chance in pairs(items[item]["R"]) do
+      if refloot[ref] then
+        if refloot[ref]["U"] then
+          for unit in pairs(refloot[ref]["U"]) do
+            if units[unit] and units[unit]["coords"] then
+              local count = table.getn(units[unit]["coords"])
+              if count > best_count then
+                best_count = count
+                best_source = {type = "unit", id = unit}
+              end
+            end
+          end
+        end
+        if refloot[ref]["O"] then
+          for object in pairs(refloot[ref]["O"]) do
+            if objects[object] and objects[object]["coords"] then
+              local count = table.getn(objects[object]["coords"])
+              if count > best_count then
+                best_count = count
+                best_source = {type = "object", id = object}
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+
+  return best_source
+end
+
+-- Helper to add item drop map nodes for a given quest/item
+local function AddItemDropNodes(id, item, meta, maps, quests, items, units, objects, refloot, sources_text, sources_with_levels)
+  local best_source = GetBestItemSource(item, items, units, objects, refloot)
+  if not best_source then return maps end
+
+  local coords_table = best_source.type == "unit" and units[best_source.id]["coords"] or objects[best_source.id]["coords"]
+
+  local zones_coords = {}
+  for _, data in pairs(coords_table) do
+    local x, y, zone = unpack(data)
+    if zone > 0 and not zones_coords[zone] then
+      zones_coords[zone] = {x, y}
+    end
+  end
+
+  for zone, coords in pairs(zones_coords) do
+    local item_meta = {}
+    for k, v in pairs(meta or {}) do item_meta[k] = v end
+
+    item_meta["QTYPE"] = "ITEM_START"
+    item_meta["layer"] = 4
+    item_meta["texture"] = pfQuestConfig.path.."\\img\\available"
+
+    local plevel = UnitLevel("player")
+    if quests[id]["min"] and quests[id]["min"] > plevel then
+      item_meta["vertex"] = { 1, .6, .6 }
+      item_meta["layer"] = 2
+    elseif quests[id]["lvl"] and quests[id]["lvl"] <= GetGrayLevel(plevel) then
+      item_meta["vertex"] = { 1, 1, 1 }
+      item_meta["layer"] = 2
+    elseif quests[id]["event"] then
+      item_meta["vertex"] = { .2, .8, 1 }
+      item_meta["layer"] = 2
+    end
+
+    item_meta["spawn"] = pfDB["items"]["loc"][item] or UNKNOWN
+    item_meta["spawnid"] = item
+    item_meta["item"] = pfDB["items"]["loc"][item]
+    item_meta["dropsources"] = sources_text
+    item_meta["dropsources_levels"] = sources_with_levels
+    item_meta["title"] = item_meta["quest"] or item_meta["spawn"]
+    item_meta["zone"] = zone
+    item_meta["x"] = coords[1]
+    item_meta["y"] = coords[2]
+    item_meta["level"] = pfQuest_Loc["N/A"]
+    item_meta["spawntype"] = "Item Drop"
+    item_meta["respawn"] = pfQuest_Loc["N/A"]
+    item_meta["qlvl"] = quests[id]["lvl"]
+    item_meta["qmin"] = quests[id]["min"]
+    item_meta["description"] = pfDatabase:BuildQuestDescription(item_meta)
+
+    maps = maps or {}
+    maps[zone] = maps[zone] and maps[zone] + 1 or 1
+    pfMap:AddNode(item_meta)
+  end
+
+  return maps
+end
+
+-- Item Drop System: Override SearchQuestID to show item-start quests for current quest givers
+local originalSearchQuestID = pfDatabase.SearchQuestID
+pfDatabase.SearchQuestID = function(self, id, meta, maps)
+  maps = originalSearchQuestID(self, id, meta, maps)
+
+  local quests = pfDB["quests"]["data"]
+  local items = pfDB["items"]["data"]
+  local units = pfDB["units"]["data"]
+  local objects = pfDB["objects"]["data"]
+  local refloot = pfDB["refloot"]["data"]
+
+  if not quests[id] then return maps end
+
+  if pfQuest_config["currentquestgivers"] == "1" then
+    if quests[id]["start"] and not meta["qlogid"] then
+      if quests[id]["start"]["I"] then
+        for _, item in pairs(quests[id]["start"]["I"]) do
+          if items[item] then
+            local _, sources_with_levels, sources_text = GetItemDropSources(item, items, units, objects, refloot)
+            maps = AddItemDropNodes(id, item, meta, maps, quests, items, units, objects, refloot, sources_text, sources_with_levels)
+          end
+        end
+      end
+    end
+  end
+
+  return maps
+end
+
+local function ItemDropQuestFilter(id, plevel, pclass, prace)
+  local quests = pfDB["quests"]["data"]
+
+  -- hide active quest
+  if pfQuest.questlog[id] then return end
+  -- hide completed quests
+  if pfQuest_history[id] then return end
+  -- hide broken quests without names
+  if not pfDB.quests.loc[id] or not pfDB.quests.loc[id].T then return end
+
+  local quest = quests[id]
+  if not quest then return end
+
+  -- hide missing pre-quests
+  if quest["pre"] then
+    local one_complete = nil
+    for _, prequest in pairs(quest["pre"]) do
+      if pfQuest_history[prequest] then
+        one_complete = true
+      end
+    end
+    if not one_complete then return end
+  end
+
+  -- hide non-available quests for your race
+  if quest["race"] and not ( bit.band(quest["race"], prace) == prace ) then return end
+  -- hide non-available quests for your class
+  if quest["class"] and not ( bit.band(quest["class"], pclass) == pclass ) then return end
+  -- hide non-available quests for your profession
+  if quest["skill"] and not pfDatabase:GetPlayerSkill(quest["skill"]) then return end
+  -- hide highlevel quests that are too far above player
+  if quest["min"] and quest["min"] > plevel + 3 then return end
+
+  return true
+end
+
+local originalSearchQuests = pfDatabase.SearchQuests
+pfDatabase.SearchQuests = function(self, meta, maps)
+  maps = originalSearchQuests(self, meta, maps)
+
+  local quests = pfDB["quests"]["data"]
+  local items = pfDB["items"]["data"]
+  local units = pfDB["units"]["data"]
+  local objects = pfDB["objects"]["data"]
+  local refloot = pfDB["refloot"]["data"]
+
+  local plevel = UnitLevel("player")
+  local pfaction = UnitFactionGroup("player")
+  pfaction = pfaction == "Horde" and "H" or pfaction == "Alliance" and "A" or "GM"
+
+  local _, race = UnitRace("player")
+  local prace = pfDatabase:GetBitByRace(race)
+  local _, class = UnitClass("player")
+  local pclass = pfDatabase:GetBitByClass(class)
+
+  for id in pairs(quests) do
+    if quests[id]["start"] and quests[id]["start"]["I"] and ItemDropQuestFilter(id, plevel, pclass, prace) then
+      -- Additional faction check for quest enders
+      local validFaction = true
+      if quests[id]["end"] and quests[id]["end"]["U"] then
+        validFaction = false
+        for _, unit in pairs(quests[id]["end"]["U"]) do
+          local unitData = units[unit]
+          if pfDatabase:IsFriendly(unit) or (unitData and not unitData["fac"]) then
+            validFaction = true
+            break
+          end
+        end
+      end
+
+      if validFaction then
+        for _, item in pairs(quests[id]["start"]["I"]) do
+          if items[item] then
+            local _, sources_with_levels, sources_text = GetItemDropSources(item, items, units, objects, refloot)
+
+            local quest_meta = {}
+            for k, v in pairs(meta or {}) do quest_meta[k] = v end
+            quest_meta["quest"] = pfDB["quests"]["loc"][id] and pfDB["quests"]["loc"][id].T or UNKNOWN
+            quest_meta["questid"] = id
+
+            maps = AddItemDropNodes(id, item, quest_meta, maps, quests, items, units, objects, refloot, sources_text, sources_with_levels)
+          end
+        end
+      end
+    end
+  end
+
+  return maps
+end
+
+-- Override BuildQuestDescription to handle ITEM_START quest type
+local originalBuildQuestDescription = pfDatabase.BuildQuestDescription
+pfDatabase.BuildQuestDescription = function(self, meta)
+  if meta and meta.QTYPE == "ITEM_START" then
+    if not meta.title or not meta.quest then return meta.description end
+    if meta.dropsources and meta.dropsources ~= "" then
+      return string.format("Loot |cff33ffcc[%s]|r from |cff33ffcc%s|r to obtain |cff66ff66[!]|cff33ffcc %s|r", (meta.spawn or UNKNOWN), meta.dropsources, (meta.quest or UNKNOWN))
+    else
+      return string.format("Loot |cff33ffcc[%s]|r to obtain |cff66ff66[!]|cff33ffcc %s|r", (meta.spawn or UNKNOWN), (meta.quest or UNKNOWN))
+    end
+  end
+  return originalBuildQuestDescription(self, meta)
+end
+
+-- Override NodeEnter to show custom tooltips for ITEM_START nodes
+local originalNodeEnter = pfMap.NodeEnter
+pfMap.NodeEnter = function()
+  if not this or not this.node then
+    if originalNodeEnter then originalNodeEnter() end
+    return
+  end
+
+  local hasItemStart = false
+  local itemStartMeta = nil
+  for title, meta in pairs(this.node) do
+    if meta.QTYPE == "ITEM_START" and meta.dropsources_levels then
+      hasItemStart = true
+      itemStartMeta = meta
+      break
+    end
+  end
+
+  if hasItemStart and itemStartMeta then
+    local tooltip = this:GetParent() == WorldMapButton and WorldMapTooltip or GameTooltip
+    tooltip:SetOwner(this, "ANCHOR_LEFT")
+    this.spawn = this.spawn or UNKNOWN
+    tooltip:SetText(this.spawn..(pfQuest_config.showids == "1" and " |cffcccccc("..this.spawnid..")|r" or ""), .3, 1, .8)
+    tooltip:AddDoubleLine(pfQuest_Loc["Type"] .. ":", (this.spawntype or UNKNOWN), .8,.8,.8, 1,1,1)
+
+    if itemStartMeta.dropsources_levels then
+      tooltip:AddLine(" ")
+      tooltip:AddLine("Drops from:", .8,.8,.8)
+
+      local sorted_sources = {}
+      for source_name, data in pairs(itemStartMeta.dropsources_levels) do
+        table.insert(sorted_sources, {name = source_name, level = data.level, chance = data.chance or 0})
+      end
+
+      table.sort(sorted_sources, function(a, b)
+        return a.chance > b.chance
+      end)
+
+      local count = 0
+      for _, source in ipairs(sorted_sources) do
+        count = count + 1
+        if count <= 5 then
+          tooltip:AddLine("  " .. source.name .. " (" .. source.level .. ") - " .. source.chance .. "%", 1,1,1)
+        end
+      end
+
+      if table.getn(sorted_sources) > 5 then
+        tooltip:AddLine("  (+" .. (table.getn(sorted_sources) - 5) .. " more)", .7,.7,.7)
+      end
+    end
+
+    tooltip:AddLine(" ")
+
+    for title, meta in pairs(this.node) do
+      pfMap:ShowTooltip(meta, tooltip)
+    end
+
+    if pfQuest_config["tooltiphelp"] == "1" then
+      local text = pfQuest_Loc["Use <Shift>-Click To Mark Quest As Done"]
+      tooltip:AddLine(text, .6, .6, .6)
+      tooltip:Show()
+    end
+
+    pfMap.highlight = pfQuest_config["mouseover"] == "1" and this.title
+  else
+    if originalNodeEnter then
+      originalNodeEnter()
+    end
+  end
+end
