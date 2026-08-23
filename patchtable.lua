@@ -192,6 +192,24 @@ local function GetGrayLevel(charLevel)
   end
 end
 
+local RANK_INFO = {
+  ["1"] = { text = "Elite",      r = 1, g = 0.5,  b = 0 },
+  ["2"] = { text = "Rare Elite", r = 1, g = 0.42, b = 0.71 },
+  ["3"] = { text = "Boss",       r = 1, g = 0,    b = 0 },
+  ["4"] = { text = "Rare",       r = 1, g = 1,    b = 0 },
+}
+
+local function AddRankLine(tooltip, spawnid)
+  if not spawnid then return end
+
+  local units = pfDB["units"] and pfDB["units"]["data"]
+  local unit = units and units[spawnid]
+  local info = unit and unit["rnk"] and RANK_INFO[tostring(unit["rnk"])]
+  if not info then return end
+
+  tooltip:AddDoubleLine((pfQuest_Loc["Rank"] or "Rank") .. ":", info.text, .8, .8, .8, info.r, info.g, info.b)
+end
+
 -- Helper to gather item drop source info for a quest-starting item
 local function GetItemDropSources(item, items, units, objects, refloot)
   local drop_sources = {}
@@ -520,6 +538,58 @@ pfDatabase.BuildQuestDescription = function(self, meta)
   return originalBuildQuestDescription(self, meta)
 end
 
+-- Extend QuestFilter with a few title-based quest hide options (settings
+-- added in pfQuest-worldmap.lua's "Quest Filters" section)
+local originalQuestFilter = pfDatabase.QuestFilter
+pfDatabase.QuestFilter = function(self, id, plevel, pclass, prace)
+  if not originalQuestFilter(self, id, plevel, pclass, prace) then
+    return
+  end
+
+  local title = pfDB.quests.loc[id] and pfDB.quests.loc[id].T
+
+  if title then
+    -- hide PvP/battleground quests
+    if pfQuest_config["hidePvPQuests"] == "1" and not string.find(title, "Alteraci Shilling") and (
+      string.find(title, "Warsong") or
+      string.find(title, "Arathi") or
+      string.find(title, "Alterac") or
+      string.find(title, "Battleground") or
+      string.find(title, "Call to Skirmish")
+    ) then
+      return
+    end
+
+    -- hide cloth donation quests
+    if pfQuest_config["hideDonationQuests"] == "1" and (
+      string.find(title, "A Donation of Wool") or
+      string.find(title, "A Donation of Silk") or
+      string.find(title, "A Donation of Mageweave") or
+      string.find(title, "A Donation of Runecloth") or
+      string.find(title, "Additional Runecloth")
+    ) then
+      return
+    end
+
+    -- hide chicken quests
+    if pfQuest_config["hideChickenQuests"] == "1" and string.find(title, "CLUCK!") then
+      return
+    end
+
+    -- hide Felwood corrupted flower quests
+    if pfQuest_config["hideFelwoodFlowers"] == "1" and (
+      title == "Corrupted Windblossom" or
+      title == "Corrupted Whipper Root" or
+      title == "Corrupted Songflower" or
+      title == "Corrupted Night Dragon"
+    ) then
+      return
+    end
+  end
+
+  return true
+end
+
 -- Override NodeEnter to show custom tooltips for ITEM_START nodes
 local originalNodeEnter = pfMap.NodeEnter
 pfMap.NodeEnter = function()
@@ -544,6 +614,7 @@ pfMap.NodeEnter = function()
     this.spawn = this.spawn or UNKNOWN
     tooltip:SetText(this.spawn..(pfQuest_config.showids == "1" and " |cffcccccc("..this.spawnid..")|r" or ""), .3, 1, .8)
     tooltip:AddDoubleLine(pfQuest_Loc["Type"] .. ":", (this.spawntype or UNKNOWN), .8,.8,.8, 1,1,1)
+    AddRankLine(tooltip, this.spawnid)
 
     if itemStartMeta.dropsources_levels then
       tooltip:AddLine(" ")
@@ -585,8 +656,134 @@ pfMap.NodeEnter = function()
 
     pfMap.highlight = pfQuest_config["mouseover"] == "1" and this.title
   else
-    if originalNodeEnter then
-      originalNodeEnter()
+    if pfQuestCompat and pfQuestCompat.client and pfQuestCompat.client >= 30300 then
+      WorldMapPOIFrame.allowBlobTooltip = false
+    end
+
+    local tooltip = this:GetParent() == WorldMapButton and WorldMapTooltip or GameTooltip
+    tooltip:SetOwner(this, "ANCHOR_LEFT")
+    this.spawn = this.spawn or UNKNOWN
+    tooltip:SetText(this.spawn..(pfQuest_config.showids == "1" and " |cffcccccc("..this.spawnid..")|r" or ""), .3, 1, .8)
+    tooltip:AddDoubleLine(pfQuest_Loc["Level"] .. ":", (this.level or UNKNOWN), .8,.8,.8, 1,1,1)
+    tooltip:AddDoubleLine(pfQuest_Loc["Type"] .. ":", (this.spawntype or UNKNOWN), .8,.8,.8, 1,1,1)
+    AddRankLine(tooltip, this.spawnid)
+    tooltip:AddDoubleLine(pfQuest_Loc["Respawn"] .. ":", (this.respawn or UNKNOWN), .8,.8,.8, 1,1,1)
+
+    for title, meta in pairs(this.node) do
+      pfMap:ShowTooltip(meta, tooltip)
+    end
+
+    if pfQuest_config["tooltiphelp"] == "1" then
+      local text = pfQuest_Loc["Use <Shift>-Click To Remove Nodes"]
+
+      if this.cluster then
+        text = pfQuest_Loc["Hold <Ctrl> To Hide Cluster"]
+      elseif tooltip == GameTooltip then
+        text = pfQuest_Loc["Hold <Ctrl> To Hide Minimap Nodes"]
+      elseif not this.texture then
+        text = pfQuest_Loc["Click Node To Change Color"]
+      elseif this.questid and this.texture and this.layer < 5 then
+        text = pfQuest_Loc["Use <Shift>-Click To Mark Quest As Done"]
+      end
+
+      tooltip:AddLine(text, .6, .6, .6)
+
+      local unitData = pfDB["units"]["data"][this.spawnid]
+      if unitData and unitData["rnk"] and pfQuestLoot.HasDrops(this.spawnid) then
+        tooltip:AddLine(pfQuest_Loc["Alt-Click To Show Item Drops"] or "Alt-Click To Show Item Drops", .6, .6, .6)
+      end
+
+      tooltip:Show()
+    end
+
+    pfMap.highlight = pfQuest_config["mouseover"] == "1" and this.title
+  end
+end
+
+local originalNodeClick = pfMap.NodeClick
+pfMap.NodeClick = function()
+  if IsAltKeyDown() and this.spawnid then
+    local unitData = pfDB["units"]["data"][this.spawnid]
+    if unitData and unitData["rnk"] then
+      pfQuestLoot.ShowPinned(this)
+      return
     end
   end
+
+  if originalNodeClick then originalNodeClick() end
+end
+
+-- Add rank (Elite/Rare/Boss/etc) line to unit search results in the browser
+local function RankedUnitResultEnter()
+  this.tex:SetTexture(1, 1, 1, .1)
+
+  local id = this.id
+  local name = this.name
+  local maps = {}
+  local units = pfDB["units"]["data"]
+  local unitData = units[id]
+
+  GameTooltip:SetOwner(this, "ANCHOR_LEFT", -10, -5)
+  GameTooltip:SetText(name, .3, 1, .8)
+
+  if unitData and unitData.lvl then
+    GameTooltip:AddLine(" ")
+    GameTooltip:AddDoubleLine(pfQuest_Loc["Level"], unitData.lvl, 1,1,.8, 1,1,1)
+  end
+
+  AddRankLine(GameTooltip, id)
+
+  local reactionStringA = "|c00ff0000" .. pfQuest_Loc["Hostile"] .. "|r"
+  local reactionStringH = "|c00ff0000" .. pfQuest_Loc["Hostile"] .. "|r"
+  if unitData and unitData.fac then
+    if unitData.fac == "AH" then
+      reactionStringA = "|c0000ff00" .. pfQuest_Loc["Friendly"] .. "|r"
+      reactionStringH = "|c0000ff00" .. pfQuest_Loc["Friendly"] .. "|r"
+    elseif unitData.fac == "A" then
+      reactionStringA = "|c0000ff00" .. pfQuest_Loc["Friendly"] .. "|r"
+    elseif unitData.fac == "H" then
+      reactionStringH = "|c0000ff00" .. pfQuest_Loc["Friendly"] .. "|r"
+    end
+  end
+  GameTooltip:AddLine(" ")
+  GameTooltip:AddDoubleLine(pfQuest_Loc["Reaction"], "", 1,1,.8, 1,1,1)
+  GameTooltip:AddDoubleLine(pfQuest_Loc["Alliance"], reactionStringA, 1,1,1, 0,0,0)
+  GameTooltip:AddDoubleLine(pfQuest_Loc["Horde"], reactionStringH, 1,1,1, 0,0,0)
+
+  GameTooltip:AddLine(" ")
+  GameTooltip:AddDoubleLine(pfQuest_Loc["Location"], "", 1,1,.8, 1,1,1)
+  if units[id] and units[id]["coords"] then
+    for _, data in pairs(units[id]["coords"]) do
+      maps[data[3]] = maps[data[3]] or { count = 0 }
+      maps[data[3]].count = maps[data[3]].count + 1
+    end
+  end
+
+  local unknown = true
+  for zone, obj in pfQuest:SortedPairs(maps, "count", nil) do
+    GameTooltip:AddDoubleLine((zone and pfMap:GetMapNameByID(zone) or UNKNOWN), obj.count, 1,1,1, .3,1,.8)
+    unknown = nil
+  end
+
+  if unknown then
+    GameTooltip:AddLine(UNKNOWN, 1,.5,.5)
+  end
+
+  GameTooltip:Show()
+end
+
+local function RebindUnitResultTooltips()
+  local unitTab = pfBrowser and pfBrowser.tabs and pfBrowser.tabs["units"]
+  if not unitTab or not unitTab.buttons then return end
+
+  for _, button in pairs(unitTab.buttons) do
+    if not button.rankTooltipHooked then
+      button:SetScript("OnEnter", RankedUnitResultEnter)
+      button.rankTooltipHooked = true
+    end
+  end
+end
+
+if pfBrowser and pfBrowser.input then
+  pfBrowser.input:HookScript("OnTextChanged", RebindUnitResultTooltips)
 end
