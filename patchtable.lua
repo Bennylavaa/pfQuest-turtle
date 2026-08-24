@@ -705,71 +705,15 @@ pfMap.NodeClick = function()
   if IsAltKeyDown() and this.spawnid then
     local unitData = pfDB["units"]["data"][this.spawnid]
     if unitData and unitData["rnk"] then
-      pfQuestLoot.ShowPinned(this)
+      local ok, err = pcall(pfQuestLoot.ShowPinned, this)
+      if not ok then
+        DEFAULT_CHAT_FRAME:AddMessage("|cffff0000[pfQuest-turtle]|r ShowPinned error: " .. tostring(err))
+      end
       return
     end
   end
 
   if originalNodeClick then originalNodeClick() end
-end
-
--- Add rank (Elite/Rare/Boss/etc) line to unit search results in the browser
-local function RankedUnitResultEnter()
-  this.tex:SetTexture(1, 1, 1, .1)
-
-  local id = this.id
-  local name = this.name
-  local maps = {}
-  local units = pfDB["units"]["data"]
-  local unitData = units[id]
-
-  GameTooltip:SetOwner(this, "ANCHOR_LEFT", -10, -5)
-  GameTooltip:SetText(name, .3, 1, .8)
-
-  if unitData and unitData.lvl then
-    GameTooltip:AddLine(" ")
-    GameTooltip:AddDoubleLine(pfQuest_Loc["Level"], unitData.lvl, 1,1,.8, 1,1,1)
-  end
-
-  AddRankLine(GameTooltip, id)
-
-  local reactionStringA = "|c00ff0000" .. pfQuest_Loc["Hostile"] .. "|r"
-  local reactionStringH = "|c00ff0000" .. pfQuest_Loc["Hostile"] .. "|r"
-  if unitData and unitData.fac then
-    if unitData.fac == "AH" then
-      reactionStringA = "|c0000ff00" .. pfQuest_Loc["Friendly"] .. "|r"
-      reactionStringH = "|c0000ff00" .. pfQuest_Loc["Friendly"] .. "|r"
-    elseif unitData.fac == "A" then
-      reactionStringA = "|c0000ff00" .. pfQuest_Loc["Friendly"] .. "|r"
-    elseif unitData.fac == "H" then
-      reactionStringH = "|c0000ff00" .. pfQuest_Loc["Friendly"] .. "|r"
-    end
-  end
-  GameTooltip:AddLine(" ")
-  GameTooltip:AddDoubleLine(pfQuest_Loc["Reaction"], "", 1,1,.8, 1,1,1)
-  GameTooltip:AddDoubleLine(pfQuest_Loc["Alliance"], reactionStringA, 1,1,1, 0,0,0)
-  GameTooltip:AddDoubleLine(pfQuest_Loc["Horde"], reactionStringH, 1,1,1, 0,0,0)
-
-  GameTooltip:AddLine(" ")
-  GameTooltip:AddDoubleLine(pfQuest_Loc["Location"], "", 1,1,.8, 1,1,1)
-  if units[id] and units[id]["coords"] then
-    for _, data in pairs(units[id]["coords"]) do
-      maps[data[3]] = maps[data[3]] or { count = 0 }
-      maps[data[3]].count = maps[data[3]].count + 1
-    end
-  end
-
-  local unknown = true
-  for zone, obj in pfQuest:SortedPairs(maps, "count", nil) do
-    GameTooltip:AddDoubleLine((zone and pfMap:GetMapNameByID(zone) or UNKNOWN), obj.count, 1,1,1, .3,1,.8)
-    unknown = nil
-  end
-
-  if unknown then
-    GameTooltip:AddLine(UNKNOWN, 1,.5,.5)
-  end
-
-  GameTooltip:Show()
 end
 
 local function RebindUnitResultTooltips()
@@ -778,7 +722,11 @@ local function RebindUnitResultTooltips()
 
   for _, button in pairs(unitTab.buttons) do
     if not button.rankTooltipHooked then
-      button:SetScript("OnEnter", RankedUnitResultEnter)
+      local originalOnEnter = button:GetScript("OnEnter")
+      button:SetScript("OnEnter", function()
+        if originalOnEnter then originalOnEnter() end
+        AddRankLine(GameTooltip, this.id)
+      end)
       button.rankTooltipHooked = true
     end
   end

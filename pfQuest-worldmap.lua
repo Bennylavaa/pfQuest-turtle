@@ -384,7 +384,27 @@ local function PlaceContinentPins(continent, layout, pinCount, playerLevel, proc
                             local isUtilityNPC = false
 
                             if data.addon and string.find(data.addon, "TRACK_") then
-                                isUtilityNPC = true
+                                -- avoid over populating continent maps with crap make zone only
+                                local allowedTracks = {
+                                    "TRACK_FLIGHT", "TRACK_AUCTIONEER", "TRACK_BANKER", "TRACK_BATTLEMASTER",
+                                    "TRACK_INNKEEPER", "TRACK_MAILBOX", "TRACK_STABLEMASTER",
+                                    "TRACK_SPIRITHEALER", "TRACK_MEETINGSTONE",
+                                }
+
+                                local isAllowed = false
+                                for _, track in pairs(allowedTracks) do
+                                    if string.find(data.addon, track) then
+                                        isAllowed = true
+                                        break
+                                    end
+                                end
+
+                                if isAllowed then
+                                    isUtilityNPC = true
+                                else
+                                    skipNode = true
+                                    break
+                                end
                             end
 
                             -- avoid duplicate pins for zone/city pairs that overlap

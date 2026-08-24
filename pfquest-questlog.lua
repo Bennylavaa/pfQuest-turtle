@@ -120,32 +120,41 @@ questLogFrame:SetScript("OnEvent", function()
         AcceptQuest()
     end
 
-    -- these globals don't exist on this client (unlike WotLK), so skip
-    -- gossip-quest automation entirely rather than error every time a
-    -- gossip window opens; direct quest-frame automation above still works
-    if event == "GOSSIP_SHOW" and GetNumGossipAvailableQuests then
-        local numAvailable = GetNumGossipAvailableQuests()
-        for i = 1, numAvailable do
-            local title,_,isLowLevel = GetGossipAvailableQuests(i)
-
-            if not SkipLowLevelQuest(isLowLevel) then
-                SelectGossipAvailableQuest(i)
+    if event == "GOSSIP_SHOW" and GetGossipAvailableQuests then
+        local available = { GetGossipAvailableQuests() }
+        local questIndex = 0
+        local i = 1
+        while i <= table.getn(available) do
+            if type(available[i]) == "string" then
+                questIndex = questIndex + 1
+                local isLowLevel = available[i + 2]
+                if not SkipLowLevelQuest(isLowLevel) then
+                    SelectGossipAvailableQuest(questIndex)
+                    return
+                end
+                i = i + 3
+            else
+                i = i + 1
             end
         end
 
-        local numGossipActiveQuests = GetNumGossipActiveQuests()
-        for i = 1, numGossipActiveQuests do
-            local activeQuests = { GetGossipActiveQuests() }
-            if (activeQuests[i * 4] == 1) then
-                SelectGossipActiveQuest(i)
-            end
-        end
+        local active = { GetGossipActiveQuests() }
+        questIndex = 0
+        i = 1
+        while i <= table.getn(active) do
+            if type(active[i]) == "string" then
+                questIndex = questIndex + 1
+                local activeTitle = active[i]
 
-        if pfQuest_config["automateRuneclothDonations"] == "1" and GetNumGossipActiveQuests() == 1 then
-            local title = GetGossipActiveQuests(1)
-            if string.find(title, "Additional Runecloth") then
-                SelectGossipActiveQuest(1)
+                if pfQuest_config["automateRuneclothDonations"] == "1" and string.find(activeTitle, "Additional Runecloth") then
+                    SelectGossipActiveQuest(questIndex)
+                    return
+                end
+
+                SelectGossipActiveQuest(questIndex)
+                return
             end
+            i = i + 1
         end
     end
 end)

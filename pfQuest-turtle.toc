@@ -25,3 +25,6 @@ pfQuest-worldmap.lua
 pfQuest-lootpanel.lua
 pfquest-questlog.lua
 pfQuest-updater.lua
+pfQuest-nameplates.lua
+pfQuest-announce.lua
+pfQuest-partyprogress.lua

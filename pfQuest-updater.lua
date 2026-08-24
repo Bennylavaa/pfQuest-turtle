@@ -20,20 +20,15 @@ fix = tonumber(fix) or 0
 local alreadyshown = false
 local localversion = major*10000 + minor*100 + fix
 local remoteversion = tonumber(pfqtupdateavailable) or 0
--- "BATTLEGROUND" isn't a valid SendAddonMessage target on this client
--- (throws "Unknown addon chat type"), unlike on WotLK
 local loginchannels = { "RAID", "GUILD", "PARTY" }
 local groupchannels = { "RAID", "PARTY" }
 
--- defensive wrapper in case any other channel type isn't valid here either
 local function SafeSendAddonMessage(prefix, text, chatType, target)
     pcall(SendAddonMessage, prefix, text, chatType, target)
 end
 local partyVersions = {}
 local manualPings = {}
 
--- character allowed to see per-player version labels on party/target
--- frames and use /pfqt PLAYERNAME to ping someone's version
 local ADMIN_NAME = "Beckylava"
 
 local function StripRealmName(fullName)
@@ -41,6 +36,20 @@ local function StripRealmName(fullName)
         return string.match(fullName, "^([^-]+)")
     end
     return fullName
+end
+
+local function GetTargetFrame()
+    if pfUI and pfUI.uf and pfUI.uf.target then
+        return pfUI.uf.target
+    end
+    return _G["TargetFrame"]
+end
+
+local function GetPartyMemberFrame(i)
+    if pfUI and pfUI.uf and pfUI.uf.group and pfUI.uf.group[i] then
+        return pfUI.uf.group[i]
+    end
+    return _G["PartyMemberFrame" .. i]
 end
 
 local function UpdatePartyVersionDisplay()
@@ -54,7 +63,7 @@ local function UpdatePartyVersionDisplay()
         local version = partyVersions[memberName] or partyVersions[stripMemberName]
 
         if memberName and version then
-            local frame = _G["PartyMemberFrame" .. i]
+            local frame = GetPartyMemberFrame(i)
 
             if frame then
                 local labelName = "pfQuestVersionLabel" .. i
@@ -94,7 +103,7 @@ local function UpdateTargetVersionDisplay()
     local version = partyVersions[targetName] or partyVersions[stripTargetName]
 
     if version then
-        local frame = _G["TargetFrame"]
+        local frame = GetTargetFrame()
 
         if frame then
             local labelName = "pfQuestVersionLabelTarget"
