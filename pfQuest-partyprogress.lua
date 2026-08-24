@@ -632,11 +632,11 @@ local function BuildQuestGroups(matchedKey)
     return questGroups
 end
 
-local function AddQuestGroupLines(tooltip, questGroups, skipQuestName)
+local function AddQuestGroupLines(tooltip, questGroups, shouldSkipHeader)
     tooltip:AddLine(" ")
 
     for questName, lines in pairs(questGroups) do
-        if questName ~= skipQuestName then
+        if not (shouldSkipHeader and shouldSkipHeader(questName)) then
             local symbol = "|cff555555[|cffffcc00!|cff555555]|r "
             tooltip:AddLine(symbol .. questName, 1, 1, 0)
         end
@@ -665,7 +665,8 @@ local function AddQuestGroupLines(tooltip, questGroups, skipQuestName)
 end
 
 local function HookGameTooltip()
-    GameTooltip:HookScript("OnTooltipSetUnit", function()
+    local watcher = CreateFrame("Frame", nil, GameTooltip)
+    watcher:SetScript("OnShow", function()
         local unitName = UnitName("mouseover")
         if not unitName then return end
         if UnitIsPlayer("mouseover") then DebugPrint("HookGameTooltip: skipped, mouseover is a player") return end
@@ -683,7 +684,14 @@ local function HookGameTooltip()
         DebugPrint("HookGameTooltip: unit=" .. unitName .. " hasData=" .. tostring(hasData))
         if not hasData then return end
 
-        AddQuestGroupLines(GameTooltip, BuildQuestGroups(unitName))
+        AddQuestGroupLines(GameTooltip, BuildQuestGroups(unitName), function(questName)
+            for qid = 1, GetNumQuestLogEntries() do
+                if pfQuestCompat.GetQuestLogTitle(qid) == questName then
+                    return true
+                end
+            end
+            return false
+        end)
         GameTooltip:Show()
     end)
 end
@@ -763,7 +771,7 @@ local function HookPfQuestTooltip()
 
         DebugPrint("ShowTooltip: hasPartyData=" .. tostring(hasPartyData) .. " matchedKey=" .. tostring(matchedKey) .. " mouseoverExists=" .. tostring(UnitExists("mouseover")))
 
-        if hasPartyData and matchedKey then
+        if hasPartyData and matchedKey and not UnitExists("mouseover") then
             local oldquest = meta["quest"]
             meta["quest"] = nil
             local ok = pcall(orig_ShowTooltip, self, meta, tooltip)

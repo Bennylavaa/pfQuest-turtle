@@ -44,15 +44,45 @@ local function FindQuestForObjective(objectiveName)
     return nil, nil
 end
 
+local function GetQuestLink(questId, questTitle)
+    if not questId or not questTitle then return nil end
+    if not pfDB or not pfDB["quests"] or not pfDB["quests"]["data"] then return nil end
+
+    local questData = pfDB["quests"]["data"][questId]
+    local level = questData and questData["lvl"]
+    if not level then return nil end
+
+    return "|cffffff00|Hquest:" .. questId .. ":" .. level .. "|h[" .. questTitle .. "]|h|r"
+end
+
+local function BuildItemLink(itemId)
+    if not itemId or not pfDB or not pfDB["items"] or not pfDB["items"]["enUS"] then
+        return nil
+    end
+
+    local itemName = pfDB["items"]["enUS"][itemId]
+    if not itemName then return nil end
+
+    local itemColor = "|cffffffff"
+    local _, _, itemQuality = GetItemInfo(itemId)
+    if itemQuality and ITEM_QUALITY_COLORS[itemQuality] then
+        local q = ITEM_QUALITY_COLORS[itemQuality]
+        itemColor = "|c" .. string.format("ff%02x%02x%02x", math.ceil(q.r * 255), math.ceil(q.g * 255), math.ceil(q.b * 255))
+    end
+
+    return itemColor .. "|Hitem:" .. itemId .. pfQuestCompat.itemsuffix .. "|h[" .. itemName .. "]|h|r"
+end
+
 local function GetItemIdForObjective(objectiveName, questId)
     if questId and pfDB and pfDB["quests"] and pfDB["quests"]["data"] then
         local questData = pfDB["quests"]["data"][questId]
 
         if questData and questData["obj"] and questData["obj"]["I"] then
             for _, itemId in pairs(questData["obj"]["I"]) do
-                local itemName = GetItemInfo(itemId)
+                local itemName = pfDB["items"] and pfDB["items"]["enUS"] and pfDB["items"]["enUS"][itemId]
 
                 if itemName and string.find(string.lower(objectiveName), string.lower(itemName), 1, true) then
+                    GetItemInfo(itemId)
                     return itemId
                 end
             end
@@ -71,6 +101,30 @@ local function GetItemIdForObjective(objectiveName, questId)
 
     SelectQuestLogEntry(originalSelection)
     return nil
+end
+
+local pendingAnnounces = {}
+local announceDelayFrame = CreateFrame("Frame")
+announceDelayFrame:SetScript("OnUpdate", function()
+    if table.getn(pendingAnnounces) == 0 then return end
+
+    local elapsed = arg1 or 0
+    local i = 1
+    while i <= table.getn(pendingAnnounces) do
+        local entry = pendingAnnounces[i]
+        entry.timer = entry.timer - elapsed
+
+        if entry.timer <= 0 then
+            entry.fn()
+            table.remove(pendingAnnounces, i)
+        else
+            i = i + 1
+        end
+    end
+end)
+
+local function ScheduleAnnounce(delay, fn)
+    table.insert(pendingAnnounces, {timer = delay, fn = fn})
 end
 
 local function OnQuestUpdate(message, previewOnly)
@@ -100,58 +154,57 @@ local function OnQuestUpdate(message, previewOnly)
         objectiveState[itemName].lastCount = iNumItems
 
         local questName, questId = FindQuestForObjective(itemName)
+        local questDisplay = (questId and GetQuestLink(questId, questName)) or questName
         local itemId = GetItemIdForObjective(itemName, questId)
-        local itemLink = nil
 
-        if itemId then
-            local name, link = GetItemInfo(itemId)
-            if link and string.find(link, "|H") then
-                itemLink = link
+        local isFinishing = false
+        if stillNeeded < 1 then
+            if pfQuest_config["announceFinished"] == "1" and not objectiveState[itemName].announced then
+                objectiveState[itemName].announced = true
+                isFinishing = true
             end
+        else
+            objectiveState[itemName].announced = false
         end
 
-        local outMessage
+        if isFinishing or (stillNeeded >= 1 and pfQuest_config["announceRemaining"] == "1") then
+            ScheduleAnnounce(0.3, function()
+                local itemLink = itemId and BuildItemLink(itemId)
 
-        if stillNeeded < 1 then
-            if pfQuest_config["announceFinished"] == "1" then
-                if not objectiveState[itemName].announced then
-                    objectiveState[itemName].announced = true
+                local outMessage
 
+                if isFinishing then
                     if pfQuest_config["announceShowItem"] == "1" and itemLink then
-                        if questName then
-                            outMessage = "Finished " .. itemLink .. " for " .. questName .. "."
+                        if questDisplay then
+                            outMessage = "Finished " .. itemLink .. " for " .. questDisplay .. "."
                         else
                             outMessage = "I have finished collecting " .. itemLink .. "."
                         end
                     else
-                        if questName then
-                            outMessage = "Finished " .. itemName .. " for " .. questName .. "."
+                        if questDisplay then
+                            outMessage = "Finished " .. itemName .. " for " .. questDisplay .. "."
                         else
                             outMessage = "I have finished " .. itemName .. "."
                         end
                     end
-                end
-            end
-        else
-            objectiveState[itemName].announced = false
-
-            if pfQuest_config["announceRemaining"] == "1" then
-                local displayItem = itemLink or itemName
-
-                if questName then
-                    outMessage = "" .. displayItem .. " for " .. questName .. " (" .. stillNeeded .. " left)"
                 else
-                    outMessage = "" .. displayItem .. " (" .. stillNeeded .. " left)"
-                end
-            end
-        end
+                    local displayItem = itemLink or itemName
 
-        if outMessage and outMessage ~= "" then
-            if previewOnly then
-                DEFAULT_CHAT_FRAME:AddMessage("|cff33ffcc[Announce preview]|r " .. outMessage)
-            else
-                SendChatMessage(outMessage, "PARTY")
-            end
+                    if questDisplay then
+                        outMessage = "" .. displayItem .. " for " .. questDisplay .. " (" .. stillNeeded .. " left)"
+                    else
+                        outMessage = "" .. displayItem .. " (" .. stillNeeded .. " left)"
+                    end
+                end
+
+                if outMessage and outMessage ~= "" then
+                    if previewOnly then
+                        DEFAULT_CHAT_FRAME:AddMessage("|cff33ffcc[Announce preview]|r " .. outMessage)
+                    else
+                        SendChatMessage(outMessage, "PARTY")
+                    end
+                end
+            end)
         end
     end
 end
