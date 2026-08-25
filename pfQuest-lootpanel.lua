@@ -13,7 +13,7 @@ local RANK_INFO = {
   ["4"] = { text = "Rare",       r = 1, g = 1,    b = 0 },
 }
 
-local unitDrops = {}
+local unitDropsCache = {}
 
 -- fixed cutoff for the optional "hide world drops" setting: items/pools
 -- shared by more units than this are treated as generic world-drops
@@ -25,51 +25,45 @@ local function CountEntries(t)
   return n
 end
 
-local function BuildUnitDropIndex()
+local function BuildDropsForUnit(unitid)
+  local cached = unitDropsCache[unitid]
+  if cached then return cached end
+
   local items = pfDB["items"]["data"]
   local refloot = pfDB["refloot"]["data"]
+  local list = {}
   local seen = {}
 
-  local function AddDrop(unitid, itemid, chance, isRef, sourceCount)
-    seen[unitid] = seen[unitid] or {}
-    if seen[unitid][itemid] then return end
-    seen[unitid][itemid] = true
-
-    unitDrops[unitid] = unitDrops[unitid] or {}
-    table.insert(unitDrops[unitid], { item = itemid, chance = chance or 0, isRef = isRef, sourceCount = sourceCount })
-  end
-
   for itemid, item in pairs(items) do
-    if item["U"] then
+    if item["U"] and item["U"][unitid] and not seen[itemid] then
+      seen[itemid] = true
       local sourceCount = CountEntries(item["U"])
-      for unitid, chance in pairs(item["U"]) do
-        AddDrop(unitid, itemid, chance, false, sourceCount)
-      end
-    end
-
-    if item["R"] then
+      table.insert(list, { item = itemid, chance = item["U"][unitid] or 0, isRef = false, sourceCount = sourceCount })
+    elseif item["R"] and not seen[itemid] then
       for ref, chance in pairs(item["R"]) do
         local refdata = refloot[ref]
-        if refdata and refdata["U"] then
+        if refdata and refdata["U"] and refdata["U"][unitid] then
+          seen[itemid] = true
           local sourceCount = CountEntries(refdata["U"])
-          for unitid in pairs(refdata["U"]) do
-            AddDrop(unitid, itemid, chance, true, sourceCount)
-          end
+          table.insert(list, { item = itemid, chance = chance or 0, isRef = true, sourceCount = sourceCount })
+          break
         end
       end
     end
   end
 
-  for _, list in pairs(unitDrops) do
-    table.sort(list, function(a, b) return a.chance > b.chance end)
-  end
+  table.sort(list, function(a, b) return a.chance > b.chance end)
+  unitDropsCache[unitid] = list
+  return list
 end
 
-BuildUnitDropIndex()
-
 local questStarterItems = {}
+local questStarterIndexBuilt = false
 
 local function BuildQuestStarterIndex()
+  if questStarterIndexBuilt then return end
+  questStarterIndexBuilt = true
+
   local quests = pfDB["quests"]["data"]
   if not quests then return end
 
@@ -82,9 +76,9 @@ local function BuildQuestStarterIndex()
   end
 end
 
-BuildQuestStarterIndex()
-
 local function PassesCategoryFilters(itemid)
+  BuildQuestStarterIndex()
+
   local showEquip = not pfQuest_config or pfQuest_config["lootPanelShowEquip"] ~= "0"
   local showQuestItems = not pfQuest_config or pfQuest_config["lootPanelShowQuestItems"] ~= "0"
   local showQuestStarters = not pfQuest_config or pfQuest_config["lootPanelShowQuestStarters"] ~= "0"
@@ -106,8 +100,8 @@ local function PassesCategoryFilters(itemid)
 end
 
 local function GetVisibleDrops(unitid)
-  local drops = unitDrops[unitid]
-  if not drops then return nil end
+  local drops = BuildDropsForUnit(unitid)
+  if not drops or table.getn(drops) == 0 then return nil end
 
   local showReference = pfQuest_config and pfQuest_config["lootPanelShowReference"] == "1"
   local showUnknownChance = pfQuest_config and pfQuest_config["lootPanelShowUnknownChance"] == "1"
@@ -413,6 +407,7 @@ mapWatcher:SetScript("OnEvent", pfQuestLoot.Hide)
 
 if WorldMapFrame then
   WorldMapFrame:HookScript("OnHide", pfQuestLoot.Hide)
+  WorldMapFrame:HookScript("OnHide", function() unitDropsCache = {} end)
 end
 
 local function ExtendPfQuestConfig()
